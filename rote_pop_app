@@ -1,0 +1,401 @@
+### Author: Christopher Field
+### Date: 9/2021
+### Packages required: 'shiny', 'RColorBrewer' (not essential, but helpful)
+
+### This script specifies a Shiny app that is a dashboard for the current population status of the Northeast population
+### of Roseate Terns (Sterna dougalli dougalli).
+
+#load packages
+library(shiny)
+library(RColorBrewer)
+
+# load R workspace that contains posterior distributions for parameters that describe tern population dynamics
+load("rote_pop_work.RData")
+
+# user interface
+ui <- fluidPage(title="Tern dashboard",
+                div(style = "padding: 10px; margin-right: 50px",
+                    #titlePanel(tags$h3(div(HTML("Dashboard for Northeast U.S. population of Roseate Terns (<i>Sterna dougallii</i>)")))),
+                    
+                    fixedRow(div(style = "height:300px; margin-right: 15px", 
+                                 column(4, h6(" "), img(src="Tern.jpg", align = "left",height='300px',width='375px')),
+                                 column(4, h2(" "), img(src="Tern_banner.jpg", align = "left",height='52px',width='400px'), #h3("Roseate Tern data dashboard"),
+                                        helpText("This dashboard is as a one-stop destination for the latest topline 
+                                         information on the population status of the Northeast U.S. population of Roseate Terns ",em("(Sterna dougallii dougallii)."),"
+                                         The plots show observed data alongside estimates of key measures of the population trend and distribution, 
+                                         with robust uncertainty bounds. The estimates come from a flexible statistical model that synthesizes all of the 
+                                         available information on the number of individuals across time and space (see documentation for more information 
+                                         on the modeling approach).")),
+                                 column(4, br(),
+                                        helpText("Users can also download clean, vector-based graphics for any needs related to communicating the latest information 
+                                         on population status (e.g. grant reports, blog articles, fact sheets, other media). Each plot type has 
+                                         a few parameters that can be adjusted to customize the output for its intended purpose or audience. Please download the
+                                         documentation for more information on the data and model output shown in the plots and a description of the 
+                                         statistical models."), br(),
+                                        downloadButton("downloadData", "Download documentation"))
+                    )
+                    ),
+                    
+                    fluidRow(
+                      column(4, #align="center",
+                             div(style = "height:670px; width:400px; background-color: rgba(102, 204, 238, 0); overflow-y: scroll; padding: 10px",
+                                 h4("Northeast trend"),
+                                 plotOutput("NEtrendPlot", height = "400px", width = "375px"),
+                                 div(style = "padding: 10px", radioButtons("yrs", " ",
+                                                                           c("Show the estimated population trend" = "1",
+                                                                             "Show estimated trend with annual variation" = "2"))),
+                                 div(style = "margin-left: 25px", downloadButton("pdf1", "Download .pdf"))
+                                 #downloadButton("png1", ".png")
+                                 #downloadButton("pdf1", ".pdf")
+                             )
+                      ),
+                      
+                      column(4, 
+                             div(style = "height:670px; width:400px; background-color: rgba(102, 204, 238, 0); overflow-y: scroll; padding: 10px",
+                                 h4("Regional and island trends"),
+                                 plotOutput("RegionTrendPlot", height = "450px", width = "375px"),
+                                 div(style = "padding-left: 20px", checkboxGroupInput("region", " ",
+                                                                                      c("Nova Scotia" = "1",
+                                                                                        "Québec" = "2",
+                                                                                        "Gulf of Maine" = "3",
+                                                                                        "Cape Cod" = "4",
+                                                                                        "Buzzards Bay" = "5",
+                                                                                        "Central Conn." = "6",
+                                                                                        "E. Long Island Sound" = "7",
+                                                                                        "S. Long Island" = "8"), 
+                                                                                      inline = TRUE)),
+                                 div(style = "margin-left: 25px; margin-top: 10px", downloadButton("pdf2", "Download .pdf"))
+                                 #downloadButton("png2", ".png")    
+                                 #downloadButton("pdf2", ".pdf")
+                             )
+                      ),
+                      
+                      column(4, 
+                             div(style = "height:670px; width:400px; background-color: rgba(102, 204, 238, 0); overflow-y: scroll; padding: 10px",
+                                 h4("Population distribution"),
+                                 plotOutput("stackedBars", height = "450px", width = "375px"),
+                                 div(style = "padding-left: 20px", radioButtons("FHD", " ",
+                                                                                c("Observed counts" = "2",
+                                                                                  "Modeled counts" = "1"))),
+                                 div(style = "margin-left: 25px", downloadButton("pdf3", "Download .pdf"))
+                                 #downloadButton("png3", ".png")
+                                 #downloadButton("pdf3", ".pdf")
+                             )
+                      )
+                    ),
+                    fluidRow(column(12,
+                                    div(style="display: inline-block; margin-left: 25px", 
+                                        tags$a(rel="license", href="http://creativecommons.org/licenses/by-nc/4.0/", img(alt="Creative Commons License", style="border-width:0", src="https://i.creativecommons.org/l/by-nc/4.0/88x31.png")),
+                                        HTML("&nbsp", "This work is licensed under a"),
+                                        tags$a(rel="license", href="http://creativecommons.org/licenses/by-nc/4.0/", "Creative Commons Attribution-NonCommercial 4.0 International License."), br(), br())
+                    )
+                    )
+                )
+)
+
+# server component of shiny app
+server <- function(input, output) {
+  
+  blue_bounds <- rgb(131/255, 166/255, 206/255, 0.6)
+  blue_mean <- rgb(131/255, 166/255, 206/255, 1)
+  red_danger <- rgb(245/255, 126/255, 78/255, 0.3)
+  stacked_colors <- brewer.pal(n = 8, name = "RdBu")
+  # adjust colors from brewer to better match banner
+  stacked_colors[6] <- rgb((161+5)/255, (196+5)/255, (225+5)/255, 1) #top
+  stacked_colors[5] <- rgb((191+5)/255, (226+5)/255, (255+0)/255, 1)
+  
+  output$downloadData <- downloadHandler(
+    filename = "ROTE_dashboard_doc.pdf",
+    content = function(file) {
+      file.copy("ROTE_dashboard_doc.pdf", file)
+    }
+  )
+  
+  # get values for plot elements - could also be accomplished in a script outside of Shiny app
+  bar_width <- 26
+  ts_wyear <- colMeans(NE_time_series_NA_wyear, na.rm=TRUE)
+  ts_noyear <- colMeans(NE_time_series_NA, na.rm=TRUE)
+  NE_trend_bar <- quantile(NE_trend, c(0.025, 0.5, 0.975))
+  region_time_series_plot <- apply(region_time_series, 2, rowMeans, na.rm=TRUE)
+  lambda_out_mean_plot <- apply(lambda_out_mean, 2, rowMeans, na.rm=TRUE)
+  
+  boundpoly <- reactiveValues()
+  boundpoly <- eventReactive(input$region,
+                             {region_time_series_bounds_plot <- mat.or.vec(length(lambda_out_mean_NA[1,,1]), 3)
+                             for(s in 1:length(lambda_out_mean_NA[1,,1])){
+                               if(length(which(as.numeric(input$region) > 0)) > 1){
+                                 region_time_series_bounds_plot[s, ] <- quantile(colSums(region_time_series[as.numeric(input$region), s, ], na.rm=TRUE), c(0.025, 0.5, 0.975), na.rm=TRUE)
+                               }else{
+                                 region_time_series_bounds_plot[s, ] <- quantile(region_time_series[as.numeric(input$region), s, ], c(0.025, 0.5, 0.975), na.rm=TRUE)   
+                               }
+                             }
+                             region_time_series_bounds_plot
+                             }
+  )
+  
+  # plots for Northeast trend - for app
+  NEtrendPlotz <- function(){
+    # use function() instead of renderPlot() to workaround bug in Shiny
+    #output$NEtrendPlot <- renderPlot({
+    layout(matrix(c(1, 1, 2), 3, 1, byrow = TRUE))
+    par(mar=c(4, 8, 0.5, 2.5))
+    plot(colSums(rote_y_non0, na.rm=TRUE), bty="n", xlab=" ", ylab=" ", xaxt="n", yaxt="n", xlim=c(1, 17), 
+         ylim=c(min(colSums(rote_y_non0, na.rm=TRUE))*0.96, max(colSums(rote_y_non0, na.rm=TRUE))*1.04), pch=16, col=rgb(0, 0, 0, 0.9), cex=1.2)
+    axis(side=1, at=c(1, 5, 9, 13, 17), labels=c(2004, 2008, 2012, 2016, 2020), cex.axis=1.5)
+    axis(side=2, las=2, cex.axis=1.5)
+    mtext(side=2, line=5.5, "Northeast population size")
+    mtext(side=1, line=3.5, "Year")
+    lines(colMeans(NE_time_series_NA, na.rm=TRUE), lwd=2, col=blue_mean)
+    if(input$yrs==2){
+      for(i in 1:length(colMeans(NE_time_series_NA, na.rm=TRUE))){
+        segments(i, ts_wyear[i], i, ts_noyear[i], lwd=6, lend="butt", col=blue_bounds)
+        points(colSums(rote_y_non0, na.rm=TRUE), pch=16, col=rgb(0, 0, 0, 0.9))
+      }
+    }
+    
+    par(mar=c(6, 5.5, 0, 1.5))
+    plot(NE_trend_bar, col=rgb(0, 0, 0, 0), ylim=c(0.5, 2), xlim=c(NE_trend_bar[1] - 0.01, NE_trend_bar[3]*1.5), 
+         bty="n", yaxt="n", ylab=" ", xlab=" ", cex.axis=1.5)
+    segments(NE_trend_bar[3], 0.8, NE_trend_bar[1], 0.8, lend="butt", lwd=10, col=blue_mean)
+    points(NE_trend_bar[2], 0.8, pch=16, col="white")
+    polygon(c(-1, -1, 0, 0), c(0, 1.5, 1.5, 0), col=red_danger, border=rgb(0, 0, 0, 0))
+    text(NE_trend_bar[2], 1.2, paste(round(NE_trend_bar[2], 3), "(", round(NE_trend_bar[1], 3), ", ", round(NE_trend_bar[3], 3), ")", sep=""), cex=1.5)
+    mtext(side=1, line=3.5, "Annual population change (% of the pop.)")
+  }
+  #)
+  
+  # plots for Northeast trend - version that is downloaded
+  NEtrendPlotz_ex <- function(){
+    layout(matrix(c(1, 1, 2), 3, 1, byrow = TRUE))
+    par(mar=c(4, 8, 0.5, 2.5))
+    plot(colSums(rote_y_non0, na.rm=TRUE), bty="n", xlab=" ", ylab=" ", xaxt="n", yaxt="n", xlim=c(1, 17), 
+         ylim=c(min(colSums(rote_y_non0, na.rm=TRUE))*0.96, max(colSums(rote_y_non0, na.rm=TRUE))*1.04), pch=16, col=rgb(0, 0, 0, 0.9), cex=1.2)
+    axis(side=1, at=c(1, 5, 9, 13, 17), labels=c(2004, 2008, 2012, 2016, 2020), cex.axis=1.5)
+    axis(side=2, las=2, cex.axis=1.5)
+    mtext(side=2, line=5.5, "Northeast population size")
+    mtext(side=1, line=3.5, "Year")
+    lines(colMeans(NE_time_series_NA, na.rm=TRUE), lwd=2, col=blue_mean)
+    if(input$yrs==2){
+      for(i in 1:length(colMeans(NE_time_series_NA, na.rm=TRUE))){
+        segments(i, ts_wyear[i], i, ts_noyear[i], lwd=6, lend="butt", col=blue_bounds)
+        points(colSums(rote_y_non0, na.rm=TRUE), pch=16, col=rgb(0, 0, 0, 0.9), cex=1.2)
+      }
+    }
+    
+    par(mar=c(8.5, 5.5, 0, 1.5))
+    plot(NE_trend_bar, col=rgb(0, 0, 0, 0), ylim=c(0.5, 2), xlim=c(NE_trend_bar[1] - 0.01, NE_trend_bar[3]*1.5), 
+         bty="n", yaxt="n", ylab=" ", xlab=" ", cex.axis=1.5)
+    segments(NE_trend_bar[3], 0.8, NE_trend_bar[1], 0.8, lend="butt", lwd=10, col=blue_mean)
+    points(NE_trend_bar[2], 0.8, pch=16, col="white")
+    polygon(c(-1, -1, 0, 0), c(0, 1.5, 1.5, 0), col=red_danger, border=rgb(0, 0, 0, 0))
+    text(NE_trend_bar[2], 1.2, paste(round(NE_trend_bar[2], 3), "(", round(NE_trend_bar[1], 3), ", ", round(NE_trend_bar[3], 3), ")", sep=""), cex=1.5)
+    mtext(side=1, line=3.5, "Annual population change (% of the pop.)")
+    mtext(side=1, line=6.5, cex=0.75, "Analysis/plot by Christopher Field, https://biologicalrisk.shinyapps.io/ESA_dash/", col=rgb(0, 0, 0, 0.6), adj=1)
+  }
+  
+  # create output object for ui
+  output$NEtrendPlot <- renderPlot({NEtrendPlotz()})
+  
+  #output$png1 <- downloadHandler(filename = "northeast.png",
+  #                               content = function(file){
+  #                                 png(file, width=1000, height=1200, pointsize=30)
+  #                                 NEtrendPlotz()
+  #                                 dev.off()
+  #                               })
+  
+  # set parameters for file that is downloaded
+  output$pdf1 <- downloadHandler(filename = "northeast.pdf",
+                                 content = function(file){
+                                   pdf(file, width=5, height=6)
+                                   NEtrendPlotz_ex()
+                                   dev.off()
+                                 })
+  
+  # plots for regional and site-level trend lines - for app 
+  RegionTrendPlotz <- function(){
+    # use function() instead of renderPlot() to workaround bug in Shiny
+    #output$RegionTrendPlot <- renderPlot({
+    layout(matrix(c(1, 2), 2, 1, byrow = TRUE))
+    par(mar=c(1, 5.5, 1, 2))
+    if(length(which(as.numeric(input$region) > 0)) < 1){
+      ymax <- max(region_time_series_plot)
+      ymax2 <- max(lambda_out_mean_plot)
+    }else{
+      ymax <- max(boundpoly())
+      ymax2 <- max(lambda_out_mean_plot[which(rote_region %in% input$region),])
+    }
+    plot(region_time_series_plot[1,], ylim=c(0, ymax*1.1), xlim=c(1, 17), col=rgb(0, 0, 0, 0), xaxt="n", yaxt="n", bty="n", 
+         xlab=" ", ylab=" ")
+    axis(side=2, las=2)
+    mtext(side=2, line=3.5, "Population size (region)")
+    if(length(which(as.numeric(input$region) > 0)) == 0){
+      for(i in 1:8){
+        lines(region_time_series_plot[i,], col=rgb(0, 0, 0, 0.3))
+      }
+    }
+    if(length(which(as.numeric(input$region) > 0)) > 0){
+      polygon(c(1:16, 16:1), c(boundpoly()[,1], rev(boundpoly()[,3])), 
+              col=blue_bounds, border=rgb(0, 0, 0, 0))
+      lines(boundpoly()[,2], lwd=2, col=blue_mean)
+    }
+    
+    par(mar=c(4.5, 5.5, 0.5, 2))
+    plot(lambda_out_mean_plot[1,], ylim=c(0, ymax2*1.1), xlim=c(1, 17), col=rgb(0, 0, 0, 0), bty="n", 
+         xaxt="n", yaxt="n", xlab=" ", ylab=" ")
+    axis(side=1, at=c(1, 5, 9, 13, 17), labels=c(2004, 2008, 2012, 2016, 2020))
+    axis(side=2, las=2)
+    mtext(side=1, line=2.75, "Year")
+    mtext(side=2, line=3.5, "Population size (island)")
+    if(length(which(as.numeric(input$region) > 0)) < 1){
+      for(i in 1:length(lambda_out_mean_plot[,1])){
+        lines(lambda_out_mean_plot[i,], col=rgb(0, 0, 0, 0.3))
+      }  
+    }else{
+      for(i in 1:length(which(rote_region %in% input$region))){
+        lines(lambda_out_mean_plot[which(rote_region %in% input$region)[i],], col=rgb(136/255, 176/255, 199/255, 0.9), lwd=1.75)
+      }
+    }
+  }
+  
+  # plots for regional and site-level trend lines - version that is downloaded
+  RegionTrendPlotz_ex <- function(){
+    layout(matrix(c(1, 2), 2, 1, byrow = TRUE))
+    par(mar=c(1, 5.5, 1, 2))
+    if(length(which(as.numeric(input$region) > 0)) < 1){
+      ymax <- max(region_time_series_plot)
+      ymax2 <- max(lambda_out_mean_plot)
+    }else{
+      ymax <- max(boundpoly())
+      ymax2 <- max(lambda_out_mean_plot[which(rote_region %in% input$region),])
+    }
+    plot(region_time_series_plot[1,], ylim=c(0, ymax*1.1), xlim=c(1, 17), col=rgb(0, 0, 0, 0), xaxt="n", yaxt="n", bty="n", 
+         xlab=" ", ylab=" ")
+    axis(side=2, las=2)
+    mtext(side=2, line=3.5, "Population size (region)")
+    if(length(which(as.numeric(input$region) > 0)) == 0){
+      for(i in 1:8){
+        lines(region_time_series_plot[i,], col=rgb(0, 0, 0, 0.3))
+      }
+    }
+    if(length(which(as.numeric(input$region) > 0)) > 0){
+      polygon(c(1:16, 16:1), c(boundpoly()[,1], rev(boundpoly()[,3])), 
+              col=blue_bounds, border=rgb(0, 0, 0, 0))
+      lines(boundpoly()[,2], lwd=2, col=blue_mean)
+    }
+    
+    par(mar=c(6, 5.5, 0.5, 2))
+    plot(lambda_out_mean_plot[1,], ylim=c(0, ymax2*1.1), xlim=c(1, 17), col=rgb(0, 0, 0, 0), bty="n", 
+         xaxt="n", yaxt="n", xlab=" ", ylab=" ")
+    axis(side=1, at=c(1, 5, 9, 13, 17), labels=c(2004, 2008, 2012, 2016, 2020))
+    axis(side=2, las=2)
+    mtext(side=1, line=2.75, "Year")
+    mtext(side=2, line=3.5, "Population size (island)")
+    if(length(which(as.numeric(input$region) > 0)) < 1){
+      for(i in 1:length(lambda_out_mean_plot[,1])){
+        lines(lambda_out_mean_plot[i,], col=rgb(0, 0, 0, 0.3))
+      }  
+    }else{
+      for(i in 1:length(which(rote_region %in% input$region))){
+        lines(lambda_out_mean_plot[which(rote_region %in% input$region)[i],], col=rgb(136/255, 176/255, 199/255, 0.9), lwd=1.75)
+      }
+    }
+    mtext(side=1, line=4.4, cex=0.75, "Analysis/plot by Christopher Field, https://biologicalrisk.shinyapps.io/ESA_dash/", col=rgb(0, 0, 0, 0.6), adj=1)
+  }
+  
+  # create output object for ui
+  output$RegionTrendPlot <- renderPlot({RegionTrendPlotz()})
+  
+  #output$png2 <- downloadHandler(filename = "regional.png",
+  #                               content = function(file){
+  #                                 png(file, width=1000, height=1200, pointsize=30)
+  #                                 RegionTrendPlotz()
+  #                                 dev.off()
+  #                               })
+  
+  # set parameters for file that is downloaded
+  output$pdf2 <- downloadHandler(filename = "regional.pdf",
+                                 content = function(file){
+                                   pdf(file, width=5, height=6)
+                                   RegionTrendPlotz_ex()
+                                   dev.off()
+                                 })
+  
+  # plot for visualizing island dominance - for app
+  stackedBarsz <- function(){
+    # use function() instead of renderPlot() to workaround bug in Shiny
+    #output$stackedBars <- renderPlot({
+    stack_bars <- list(stack_bars_mod, stack_bars_raw)[[as.numeric(input$FHD)]]
+    simpson <- list(simpson_mod, simpson_raw)[[as.numeric(input$FHD)]]
+    simpson_color <- list(blue_mean, "black")[[as.numeric(input$FHD)]]
+    # plot for stacked bars using either region or top x sites
+    layout(matrix(c(1, 2), 2, 1, byrow = TRUE))
+    par(mar=c(1, 6, 2, 1))
+    plot(1, 1, col=rgb(0, 0, 0, 0), xlim=c(0.5, (S+0.5)), ylim=c(0, 1), xlab=" ", ylab=" ", yaxt="n", xaxt="n", xaxs="i", yaxs="i", bty="n")
+    axis(side=2, las=2, c(0, 0.25, 0.5, 0.75, 1))
+    mtext(side=2, line=3.75, "Proportion of pop. on each island")
+    for(i in 1:S){
+      segments(i, 0, i, cumsum(stack_bars[, i])[1], col=stacked_colors[1], lwd=bar_width, lend="butt")
+      # for top x sites
+      for(z in 2:num_sites){
+        segments(i, cumsum(stack_bars[, i])[z-1], i, cumsum(stack_bars[, i])[z], col=stacked_colors[z], lend="butt", lwd=bar_width)
+      }
+    }
+    
+    par(mar=c(4.5, 6, 0, 1))
+    plot(simpson, bty="n", yaxt="n", xaxt="n", ylim=c(min(simpson)*0.98, max(simpson)*1.02), xlim=c(1, 18), type="l", lwd=2, xlab=" ", ylab=" ", col=simpson_color)
+    axis(side=2, las=2, at=list(c(0.70, 0.72, 0.74, 0.76, 0.78), c(0.64, 0.68, 0.72, 0.76))[[as.numeric(input$FHD)]])
+    axis(side=1, at=c(1, 5, 9, 13, 17), labels=c(2004, 2008, 2012, 2016, 2020))
+    mtext(side=2, line=3.75, "Island diversity index")
+    mtext(side=1, line=2.6, "Year")
+  }
+  #)
+  
+  # plot for visualizing island dominance - version that is downloaded
+  stackedBarsz_ex <- function(){
+    stack_bars <- list(stack_bars_mod, stack_bars_raw)[[as.numeric(input$FHD)]]
+    simpson <- list(simpson_mod, simpson_raw)[[as.numeric(input$FHD)]]
+    simpson_color <- list(blue_mean, "black")[[as.numeric(input$FHD)]]
+    # plot for stacked bars using either region or top x sites
+    layout(matrix(c(1, 2), 2, 1, byrow = TRUE))
+    par(mar=c(1, 6, 2, 1))
+    plot(1, 1, col=rgb(0, 0, 0, 0), xlim=c(0.5, (S+0.5)), ylim=c(0, 1), xlab=" ", ylab=" ", yaxt="n", xaxt="n", xaxs="i", yaxs="i", bty="n")
+    axis(side=2, las=2, c(0, 0.25, 0.5, 0.75, 1))
+    mtext(side=2, line=3.75, "Proportion of pop. on each island")
+    for(i in 1:S){
+      segments(i, 0, i, cumsum(stack_bars[, i])[1], col=brewer.pal(n = 8, name = "RdBu")[1], lwd=bar_width, lend="butt")
+      # for top x sites
+      for(z in 2:num_sites){
+        segments(i, cumsum(stack_bars[, i])[z-1], i, cumsum(stack_bars[, i])[z], col=brewer.pal(n = 8, name = "RdBu")[z], lend="butt", lwd=bar_width)
+      }
+    }
+    
+    par(mar=c(6, 6, 0, 1))
+    plot(simpson, bty="n", yaxt="n", xaxt="n", ylim=c(min(simpson)*0.98, max(simpson)*1.02), xlim=c(1, 18), type="l", lwd=2, xlab=" ", ylab=" ", col=simpson_color)
+    axis(side=2, las=2, at=list(c(0.70, 0.72, 0.74, 0.76, 0.78), c(0.64, 0.68, 0.72, 0.76))[[as.numeric(input$FHD)]])
+    axis(side=1, at=c(1, 5, 9, 13, 17), labels=c(2004, 2008, 2012, 2016, 2020))
+    mtext(side=2, line=3.75, "Island diversity index")
+    mtext(side=1, line=2.6, "Year")
+    mtext(side=1, line=4.4, cex=0.75, "Analysis/plot by Christopher Field, https://biologicalrisk.shinyapps.io/ESA_dash/", col=rgb(0, 0, 0, 0.6), adj=1)
+  }
+  
+  # create output object for ui
+  output$stackedBars <- renderPlot({stackedBarsz()})
+  
+  #output$png3 <- downloadHandler(filename = "island.png",
+  #                               content = function(file){
+  #                                 png(file, width=800, height=1200, pointsize=30)
+  #                                 stackedBarsz()
+  #                                 dev.off()
+  #                               })
+  
+  # set parameters for file that is downloaded
+  output$pdf3 <- downloadHandler(filename = "island.pdf",
+                                 content = function(file){
+                                   pdf(file, width=5, height=6)
+                                   stackedBarsz_ex()
+                                   dev.off()
+                                 })
+}
+
+# Run the application 
+shinyApp(ui = ui, server = server)
