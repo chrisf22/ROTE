@@ -1,0 +1,241 @@
+### Author: Christopher Field
+### Date: 9/2021
+### Packages required: 'R2jags', 'R2WinBUGS'
+
+### This script runs a hierarchical trend model that quantifies patterns in population dynamics for the
+### Northeast population of Roseate Terns (Stern dougalli dougalli).The model has random intercepts for region and year effects. 
+### The specification for year effects includes a parameter for first order temporal autocorrelation. The trend at each island
+### is determined by a regression equation that includes a fixed effect for the overall trend for the population, a random effect for region, 
+### and a random effect for island. The second part of the script obtains posterior distributions for key 
+### population measures, including the overall trend line, the percent annual change in population
+### size, annual variation, and region/site effects. The final part of the script calculates Simpson's diversity index 
+### as a measure of the dominance/evenness of the population distribution across islands. 
+
+# load packages for MCMC sampling
+library(R2jags)
+library(R2WinBUGS)
+
+# 'rote_y is peak' counts for each year
+# 'rote_y_non0 only' includes sites that have at least one recorded pair in their history
+# 'rote_region' is vector that indexes region 
+# 'S' is the number of years represented by the data
+# 'N' is the number of sites (islands) that have at least one recorded pair in their history
+
+# JAGS model
+TRENDS <- function(){
+  ## priors
+  # intercept
+  int ~ dnorm(0, 0.01)
+  # northeast trend
+  B_NE ~ dnorm(0, 0.01)
+  
+  # parameter that describes the strength of temporal autocorrelation
+  w ~ dnorm(0, 0.01)
+  
+  # SD and precision for region effect (intercept and slope)
+  sd_region ~ dunif(0, 100)
+  tau_region <- 1/(sd_region*sd_region)
+  sd_Bregion ~ dunif(0, 100)
+  tau_Bregion <- 1/(sd_Bregion*sd_Bregion)
+  
+  # SD and precision for site effect (intercept and slope)
+  sd_site ~ dunif(0, 100)
+  tau_site <- 1/(sd_site*sd_site)
+  sd_Bsite ~ dunif(0, 100)
+  tau_Bsite <- 1/(sd_Bsite*sd_Bsite)
+  
+  sd_year ~ dunif(0, 100)
+  tau_year <- 1/(sd_year*sd_year)
+  
+  # random effects for region (intercept and slope)
+  for(e in 1:max(rote_region)){
+    region_RE[e] ~ dnorm(0, tau_region)
+    Bregion[e] ~ dnorm(0, tau_Bregion)
+  }
+  
+  for(z in 1:S){
+    year_RE[z] ~ dnorm(0, tau_year)
+  }
+  
+  # loop for islands
+  for(i in 1:N){
+    # random effects for site (intercept and slope)
+    site[i] ~ dnorm(0, tau_site)
+    Bsite[i] ~ dnorm(0, tau_Bsite)
+    B[i] <- B_NE + Bregion[rote_region[i]] + Bsite[i]
+    # regression equations are outside of year loop for first two years to include temporal autocorrelation
+    log(lambda[i, 1]) <- int + region_RE[rote_region[i]] + B[i]*1 + site[i] + year_RE[1]
+    lambda_out_wyear[i, 1] <- int + region_RE[rote_region[i]] + B[i]*1 + site[i] + year_RE[1]
+    lambda_out[i, 1] <- int + region_RE[rote_region[i]] + B[i]*1 + site[i]
+    rote_y_non0[i, 1] ~ dpois(lambda[i, 1])
+    log(lambda[i, 2]) <- int + region_RE[rote_region[i]] + B[i]*2 + site[i] + year_RE[2] + year_RE[2 - 1]*w
+    lambda_out_wyear[i, 2] <- int + region_RE[rote_region[i]] + B[i]*2 + site[i] + year_RE[2] + year_RE[2 - 1]*w
+    lambda_out[i, 2] <- int + region_RE[rote_region[i]] + B[i]*2 + site[i]
+    rote_y_non0[i, 2] ~ dpois(lambda[i, 2])
+    # year loop
+    for(t in 3:S){
+      log(lambda[i, t]) <- int + region_RE[rote_region[i]] + B[i]*t + site[i] + year_RE[t] + year_RE[t - 1]*w
+      rote_y_non0[i, t] ~ dpois(lambda[i, t])
+      lambda_out_wyear[i, t] <- int + region_RE[rote_region[i]] + B[i]*t + site[i] + year_RE[t] + year_RE[t - 1]*w
+      lambda_out[i, t] <- int + region_RE[rote_region[i]] + B[i]*t + site[i] 
+    }
+  }
+}
+
+if (is.R()){
+  filename <- file.path(tempdir(), "TRENDS.bug")}
+write.model(TRENDS, filename)
+inits <- list(list(int=1, B_NE=0))
+data <- list("rote_y_non0", "rote_region", "N", "S")
+parameters <- c("int", "region_RE", "B_NE", "Bregion", "year_RE", "w", "lambda_out", "lambda_out_wyear")
+TRENDS <- jags(data=data, inits=inits, parameters.to.save=parameters, filename,
+               n.chains=1, n.burnin=100000, n.iter=200000, n.thin=1, DIC=TRUE)
+
+# get posterior predictions for year effects
+year_RE <- mat.or.vec(S-1, 1)
+for(i in 1:(S-1)){
+  year_RE[i] <- mean(TRENDS$BUGSoutput$sims.array[, , paste("year_RE[", i, "]", sep="")])
+}
+
+# get posterior predictions for lambda, with and without year effects
+lambda_out_mean <- array(0, c(N, S, 20000))
+lambda_out_mean_wyear <- array(0, c(N, S, 20000))
+for(i in 1:N){
+  lambda_out_mean[i, 1, ] <- exp(TRENDS$BUGSoutput$sims.array[, , paste("lambda_out[", i, ",", 1, "]", sep="")])
+  lambda_out_mean_wyear[i, 1, ] <- exp(TRENDS$BUGSoutput$sims.array[, , paste("lambda_out_wyear[", i, ",", 1, "]", sep="")])
+for(t in 2:S){
+    lambda_out_mean[i, t, ] <- exp(TRENDS$BUGSoutput$sims.array[, , paste("lambda_out[", i, ",", t, "]", sep="")])
+    lambda_out_mean_wyear[i, t, ] <- exp(TRENDS$BUGSoutput$sims.array[, , paste("lambda_out_wyear[", i, ",", t, "]", sep="")])
+  }
+}
+
+# version of posteriors for lambda that retains NAs from the original dataset
+lambda_out_mean_NA <- lambda_out_mean
+lambda_out_mean_NA_wyear <- lambda_out_mean_wyear
+for(i in 1:20000){
+  lambda_out_mean_NA[,,i][is.na(rote_y_non0)] <- NA
+  lambda_out_mean_NA_wyear[,,i][is.na(rote_y_non0)] <- NA
+}
+
+#get site and region level annual population trends
+site_trend <- mat.or.vec(length(lambda_out_mean_NA[,1,1]), 20000)
+first_record <- mat.or.vec(length(lambda_out_mean_NA[,1,1]), 1)
+last_record <- mat.or.vec(length(lambda_out_mean_NA[,1,1]), 1)
+for(i in 1:length(lambda_out_mean_NA[,1,1])){
+  first_record[i] <- min(which(!is.na(lambda_out_mean_NA[i,,1])))
+  last_record[i] <- max(which(!is.na(lambda_out_mean_NA[i,,1])))
+  site_trend[i, ] <- (lambda_out_mean_NA[i,last_record[i],]/lambda_out_mean_NA[i,first_record[i],])^(1/15) - 1
+}
+
+region_trend <- mat.or.vec(max(rote_region), 20000)
+region_time_series <- array(0, c(max(rote_region), length(lambda_out_mean_NA[1,,1]), 20000))
+region_time_series_bounds <- array(0, c(max(rote_region), length(lambda_out_mean_NA[1,,1]), 2))
+for(i in 1:max(rote_region)){
+  if(length(which(rote_region==i))==1){
+    region_trend[i, ] <- (lambda_out_mean_NA[which(rote_region==i),S,]/lambda_out_mean_NA[which(rote_region==i),1,])^(1/15) - 1
+    for(s in 1:length(lambda_out_mean_NA[1,,1])){
+      region_time_series[i, s, ] <- lambda_out_mean[which(rote_region==i), s, ]
+      region_time_series_bounds[i, s, ] <- quantile(lambda_out_mean[which(rote_region==i), s, ], c(0.025, 0.975), na.rm=TRUE)
+    }
+  }else{
+    region_trend[i, ] <- (colSums(lambda_out_mean_NA[which(rote_region==i),S,], na.rm=TRUE)/colSums(lambda_out_mean_NA[which(rote_region==i),1,], na.rm=TRUE))^(1/15) - 1
+    for(s in 1:length(lambda_out_mean_NA[1,,1])){
+      region_time_series[i, s, ] <- colSums(lambda_out_mean[which(rote_region==i), s, ], na.rm=TRUE)
+      region_time_series_bounds[i, s, ] <- quantile(colSums(lambda_out_mean[which(rote_region==i), s, ], na.rm=TRUE), c(0.025, 0.975), na.rm=TRUE)
+    }
+  }
+}
+
+# sum across sites to get a northeast-wide times series of population size
+NE_time_series <- apply(lambda_out_mean[,,], MARGIN =2, colSums)
+NE_time_series_NA <- apply(lambda_out_mean_NA[,,], MARGIN =2, colSums, na.rm=TRUE)
+NE_time_series_NA_wyear <- apply(lambda_out_mean_NA_wyear[,,], MARGIN =2, colSums, na.rm=TRUE)
+# get one value for the annual population trend (in terms of percent of pop.)
+NE_trend <- (NE_time_series_NA[,S]/NE_time_series_NA[,1])^(1/15) - 1
+
+plot(colSums(rote_y_non0, na.rm=TRUE))
+lines(colMeans(NE_time_series_NA, na.rm=TRUE))
+
+# get a vector of site means (over the time series) to create an index to get sites in order of decreasing abundance
+site_means <- rowMeans(apply(lambda_out_mean_NA[,,], MARGIN = 2, rowMeans, na.rm=TRUE), na.rm=TRUE)
+top_ten <- order(site_means, decreasing=TRUE)[1:10]
+
+# create stacked bars by the top x sites (denoted by num_sites)
+num_sites <- 6
+stack_bars_mod <- mat.or.vec(num_sites, S)
+for(i in 1:S){
+  for(z in 1:num_sites){
+    stack_bars_mod[z, i] <- mean(lambda_out_mean_NA[top_ten[z],i,], na.rm=TRUE)
+  }
+  stack_bars_mod[is.nan(stack_bars_mod)] <- 0
+  stack_bars_mod[, i] <- stack_bars_mod[, i ]/sum(stack_bars_mod[, i ])
+}
+stack_bars_mod <- stack_bars_mod[order(stack_bars_mod[,1]), ]
+
+# create stacked bars by region
+stack_bars <- mat.or.vec(max(rote_region), S)
+for(i in 1:S){
+  for(z in 1:max(rote_region)){
+    stack_bars[z, i] <- mean(lambda_out_mean_NA[which(rote_region==z),i,], na.rm=TRUE)
+  }
+  stack_bars[is.nan(stack_bars)] <- 0
+  stack_bars[, i] <- stack_bars[, i ]/sum(stack_bars[, i ])
+}
+stack_bars <- stack_bars[order(stack_bars[,1]), ]
+
+# create stacked bars from raw data for x top sites
+stack_bars_raw <- mat.or.vec(num_sites, S)
+for(i in 1:S){
+  for(z in 1:num_sites){
+    stack_bars_raw[z, i] <- rote_y_non0[top_ten[z], i]
+  }
+  stack_bars_raw[is.nan(stack_bars_raw)] <- 0
+  stack_bars_raw[is.na(stack_bars_raw)] <- 0
+  stack_bars_raw[, i] <- stack_bars_raw[, i]/sum(stack_bars_raw[, i], na.rm=TRUE)
+}
+stack_bars_raw <- stack_bars_raw[order(stack_bars_raw[,1]), ]
+
+# Simpson's index using raw data
+simpson_num_raw <- mat.or.vec(length(rote_y_non0[,1]), S)
+simpson_raw <- mat.or.vec(S, 1)
+simpson_num_mod <- mat.or.vec(length(rote_y_non0[,1]), S)
+simpson_mod <- mat.or.vec(S, 1)
+for(i in 1:S){
+  for(z in 1:length(rote_y_non0[,1])){
+    simpson_num_raw[z, i] <- rote_y_non0[z , i]*(rote_y_non0[z , i] - 1)
+    simpson_num_mod[z, i] <- mean(lambda_out_mean_NA[z , i, ]*(lambda_out_mean_NA[z , i, ] - 1), na.rm=TRUE) 
+  }
+  simpson_num_mod[is.nan(simpson_num_mod)] <- NA
+  simpson_raw[i] <- 1 - sum(simpson_num_raw[, i], na.rm=TRUE)/(sum(rote_y_non0[, i], na.rm=TRUE)*(sum(rote_y_non0[, i], na.rm=TRUE)-1))
+  simpson_mod[i] <- 1 - sum(simpson_num_mod[, i], na.rm=TRUE)/mean(apply(lambda_out_mean_NA[, i, ], 2, sum, na.rm=TRUE)*(apply(lambda_out_mean_NA[, i, ], 2, sum, na.rm=TRUE) - 1), na.rm=TRUE)
+}
+
+# plot for stacked bars using either region or top x sites
+bar_colors <- c("red", "blue", "orange", "green", "purple", "black", "red", "blue", "orange", "green")
+plot(1, 1, col=rgb(0, 0, 0, 0), xlim=c(0.5, (S+0.5)), ylim=c(0.000001, 1))
+for(i in 1:S){
+  segments(i, 0, i, cumsum(stack_bars[, i])[1], col=bar_colors[1], lwd=17, lend="butt")
+  for(z in 2:num_sites){
+    segments(i, cumsum(stack_bars[, i])[z-1], i, cumsum(stack_bars[, i])[z], col=bar_colors[z], lend="butt", lwd=17)
+  }
+}
+
+# get posterior means for region effects (intercept and slope)
+region_RE <- mat.or.vec(max(rote_region), 1)
+for(i in 1:max(rote_region)){
+  region_RE[i] <- mean(TRENDS$BUGSoutput$sims.array[, , paste("region_RE[", i, "]", sep="")])
+}
+Bregion <- mat.or.vec(max(rote_region), 1)
+for(i in 1:max(rote_region)){
+  Bregion[i] <- mean(TRENDS$BUGSoutput$sims.array[, , paste("Bregion[", i, "]", sep="")])
+}
+
+# site effects (intercept and slope)
+site <- mat.or.vec(N, 1)
+for(i in 1:N){
+  site[i] <- mean(TRENDS$BUGSoutput$sims.array[, , paste("site[", i, "]", sep="")])
+}
+Bsite <- mat.or.vec(N, 1)
+for(i in 1:N){
+  Bsite[i] <- mean(TRENDS$BUGSoutput$sims.array[, , paste("Bsite[", i, "]", sep="")])
+}
