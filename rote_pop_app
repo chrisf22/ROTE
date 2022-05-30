@@ -18,14 +18,15 @@ ui <- fluidPage(title="Tern dashboard",
                     #titlePanel(tags$h3(div(HTML("Dashboard for Northeast U.S. population of Roseate Terns (<i>Sterna dougallii</i>)")))),
                     
                     fixedRow(div(style = "height:300px; margin-right: 15px", 
-                                 column(4, h6(" "), img(src="Tern.jpg", align = "left",height='300px',width='375px')),
-                                 column(4, h2(" "), img(src="Tern_banner.jpg", align = "left",height='52px',width='400px'), #h3("Roseate Tern data dashboard"),
+                                 column(4, h6(" "), img(src="Tern.jpg", align="left",height='300px',width='375px')),
+                                 column(4, h2(" "), img(src="Tern_banner.jpg", align="left",height='52px',width='400px'),
                                         div(style = "font-size:14px; color: #6A6A6A", HTML(paste0("This dashboard is as a one-stop destination for the latest topline 
                                          information on the population status of the Northeast U.S. population of Roseate Terns (",em("Sterna dougallii dougallii"),").
                                          The plots show observed data alongside estimates of key measures of the population trend and distribution, 
                                          with robust uncertainty bounds. The estimates come from a flexible statistical model that synthesizes all of the 
                                          available information on the number of individuals across time and space (see documentation for more information 
-                                         on the modeling approach).")))),
+                                         on the modeling approach).")))
+                                 ),
                                  column(4, br(),br(),
                                         div(style = "font-size:14px; color: #6A6A6A", HTML(paste0("Users can also download clean, vector-based graphics for any needs related to communicating the latest information 
                                          on population status (e.g. grant reports, blog articles, fact sheets, other media). Each plot type has 
@@ -33,11 +34,10 @@ ui <- fluidPage(title="Tern dashboard",
                                          documentation for more information on the data, the model output shown in the plots, and a description of the 
                                          statistical models."))), br(),
                                         downloadButton("downloadData", "Download documentation"))
-                    )
-                    ),
+                    )),
                     
                     fluidRow(
-                      column(4, #align="center",
+                      column(4, 
                              div(style = "height:670px; width:400px; background-color: rgba(102, 204, 238, 0); overflow-y: scroll; padding: 10px",
                                  h4("Northeast trend"),
                                  plotOutput("NEtrendPlot", height = "400px", width = "375px"),
@@ -45,8 +45,6 @@ ui <- fluidPage(title="Tern dashboard",
                                                                            c("Show the estimated population trend" = "1",
                                                                              "Show estimated trend with annual variation" = "2"))),
                                  div(style = "margin-left: 25px", downloadButton("pdf1", "Download .pdf"))
-                                 #downloadButton("png1", ".png")
-                                 #downloadButton("pdf1", ".pdf")
                              )
                       ),
                       
@@ -65,8 +63,6 @@ ui <- fluidPage(title="Tern dashboard",
                                                                                         "S. Long Island" = "8"), 
                                                                                       inline = TRUE)),
                                  div(style = "margin-left: 25px; margin-top: 10px", downloadButton("pdf2", "Download .pdf"))
-                                 #downloadButton("png2", ".png")    
-                                 #downloadButton("pdf2", ".pdf")
                              )
                       ),
                       
@@ -78,8 +74,6 @@ ui <- fluidPage(title="Tern dashboard",
                                                                                 c("Observed counts" = "2",
                                                                                   "Modeled counts" = "1"))),
                                  div(style = "margin-left: 25px", downloadButton("pdf3", "Download .pdf"))
-                                 #downloadButton("png3", ".png")
-                                 #downloadButton("pdf3", ".pdf")
                              )
                       )
                     ),
@@ -88,17 +82,14 @@ ui <- fluidPage(title="Tern dashboard",
                                         tags$a(rel="license", href="http://creativecommons.org/licenses/by-nc/4.0/", img(alt="Creative Commons License", style="border-width:0", src="https://i.creativecommons.org/l/by-nc/4.0/88x31.png")),
                                         HTML("&nbsp", "This work is licensed under a"),
                                         tags$a(rel="license", href="http://creativecommons.org/licenses/by-nc/4.0/", "Creative Commons Attribution-NonCommercial 4.0 International License."), br(), br())
-                    )
-                    )
+                    ))
                 )
 )
 
 # server component of shiny app
 server <- function(input, output) {
   
-  #blue_bounds <- rgb(155/255, 206/255, 231/255, 0.6)
   blue_bounds <- rgb(131/255, 166/255, 206/255, 0.6)
-  #blue_mean <- rgb(105/255, 156/255, 181/255, 1)
   blue_mean <- rgb(131/255, 166/255, 206/255, 1)
   red_danger <- rgb(245/255, 126/255, 78/255, 0.3)
   stacked_colors <- brewer.pal(n = 8, name = "RdBu")
@@ -123,7 +114,7 @@ server <- function(input, output) {
   boundpoly <- reactiveValues()
   boundpoly <- eventReactive(input$region,
                              {region_time_series_bounds_plot <- mat.or.vec(length(lambda_out_mean_NA[1,,1]), 3)
-                             for(s in 1:length(lambda_out_mean_NA[1,,1])){
+                             for(s in 1:length(lambda_out_mean_NA[1, , 1])){
                                if(length(which(as.numeric(input$region) > 0)) > 1){
                                  region_time_series_bounds_plot[s, ] <- quantile(colSums(region_time_series[as.numeric(input$region), s, ], na.rm=TRUE), c(0.025, 0.5, 0.975), na.rm=TRUE)
                                }else{
@@ -134,9 +125,9 @@ server <- function(input, output) {
                              }
   )
   
-  # plots for Northeast trend - for app
+  # plots for Northeast trend
   NEtrendPlotz <- function(){
-    # use function() instead of renderPlot() to workaround bug in Shiny
+    # use function() instead of renderPlot() to work around bug in Shiny
     #output$NEtrendPlot <- renderPlot({
     layout(matrix(c(1, 1, 2), 3, 1, byrow = TRUE))
     par(mar=c(4, 8, 0.5, 2.5))
@@ -197,6 +188,7 @@ server <- function(input, output) {
   # create output object for ui
   output$NEtrendPlot <- renderPlot({NEtrendPlotz()})
   
+  # download handler for a png as an alternative to pdf
   #output$png1 <- downloadHandler(filename = "northeast.png",
   #                               content = function(file){
   #                                 png(file, width=1000, height=1200, pointsize=30)
@@ -212,9 +204,9 @@ server <- function(input, output) {
                                    dev.off()
                                  })
   
-  # plots for regional and site-level trend lines - for app 
+  # plots for regional and site-level trend lines
   RegionTrendPlotz <- function(){
-    # use function() instead of renderPlot() to workaround bug in Shiny
+    # use function() instead of renderPlot() to work around bug in Shiny
     #output$RegionTrendPlot <- renderPlot({
     layout(matrix(c(1, 2), 2, 1, byrow = TRUE))
     par(mar=c(1, 5.5, 1, 2))
@@ -306,6 +298,7 @@ server <- function(input, output) {
   # create output object for ui
   output$RegionTrendPlot <- renderPlot({RegionTrendPlotz()})
   
+  # download handler for a png as an alternative to pdf
   #output$png2 <- downloadHandler(filename = "regional.png",
   #                               content = function(file){
   #                                 png(file, width=1000, height=1200, pointsize=30)
@@ -321,9 +314,9 @@ server <- function(input, output) {
                                    dev.off()
                                  })
   
-  # plot for visualizing island dominance - for app
+  # plot for visualizing island dominance
   stackedBarsz <- function(){
-    # use function() instead of renderPlot() to workaround bug in Shiny
+    # use function() instead of renderPlot() to work around bug in Shiny
     #output$stackedBars <- renderPlot({
     stack_bars <- list(stack_bars_mod, stack_bars_raw)[[as.numeric(input$FHD)]]
     simpson <- list(simpson_mod, simpson_raw)[[as.numeric(input$FHD)]]
@@ -382,6 +375,7 @@ server <- function(input, output) {
   # create output object for ui
   output$stackedBars <- renderPlot({stackedBarsz()})
   
+  # download handler for a png as an alternative to pdf
   #output$png3 <- downloadHandler(filename = "island.png",
   #                               content = function(file){
   #                                 png(file, width=800, height=1200, pointsize=30)
@@ -395,8 +389,9 @@ server <- function(input, output) {
                                    pdf(file, width=5, height=6)
                                    stackedBarsz_ex()
                                    dev.off()
-                                 })
+                                 }
+                                 )
 }
 
-# Run the application 
+# run the application 
 shinyApp(ui = ui, server = server)
